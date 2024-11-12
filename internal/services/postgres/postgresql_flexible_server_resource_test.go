@@ -6,7 +6,9 @@ package postgres_test
 import (
 	"context"
 	"fmt"
+	"os"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -331,6 +333,7 @@ func TestAccPostgresqlFlexibleServer_createWithCustomerManagedKey(t *testing.T) 
 }
 
 func TestAccPostgresqlFlexibleServer_replica(t *testing.T) {
+	
 	data := acceptance.BuildTestData(t, "azurerm_postgresql_flexible_server", "test")
 	r := PostgresqlFlexibleServerResource{}
 
@@ -343,17 +346,27 @@ func TestAccPostgresqlFlexibleServer_replica(t *testing.T) {
 		},
 		data.ImportStep("administrator_password", "create_mode"),
 		{
-			PreConfig: func() { time.Sleep(15 * time.Minute) },
-			Config:    r.replica(data),
+			PreConfig: func() { time.Sleep(5 * time.Minute) },
+			Config:    r.updateReplicationRole(data, string(servers.ReplicationRoleNone)),
 			Check: acceptance.ComposeTestCheckFunc(
 				check.That("azurerm_postgresql_flexible_server.replica").ExistsInAzure(r),
+				check.That("azurerm_postgresql_flexible_server.replica").Key("replication_role").HasValue(string(servers.ReplicationRoleNone)),
 			),
 		},
 		data.ImportStep("administrator_password", "create_mode"),
 		{
-			Config: r.updateReplicationRole(data),
+			Config: r.updateReplicationRole(data, string(servers.ReplicationRoleAsyncReplica)),
 			Check: acceptance.ComposeTestCheckFunc(
 				check.That("azurerm_postgresql_flexible_server.replica").ExistsInAzure(r),
+				check.That("azurerm_postgresql_flexible_server.replica").Key("replication_role").HasValue(string(servers.ReplicationRoleAsyncReplica)),
+			),
+		},
+		data.ImportStep("administrator_password", "create_mode"),
+		{
+			Config: r.updateReplicationRole(data, string(servers.ReplicationRoleGeoAsyncReplica)),
+			Check: acceptance.ComposeTestCheckFunc(
+				check.That("azurerm_postgresql_flexible_server.replica").ExistsInAzure(r),
+				check.That("azurerm_postgresql_flexible_server.replica").Key("replication_role").HasValue(string(servers.ReplicationRoleGeoAsyncReplica)),
 			),
 		},
 		data.ImportStep("administrator_password", "create_mode"),
@@ -1233,20 +1246,20 @@ resource "azurerm_postgresql_flexible_server" "replica" {
 `, r.basic(data), data.RandomInteger)
 }
 
-func (r PostgresqlFlexibleServerResource) updateReplicationRole(data acceptance.TestData) string {
+func (r PostgresqlFlexibleServerResource) updateReplicationRole(data acceptance.TestData, role string) string {
 	return fmt.Sprintf(`
 %s
 
 resource "azurerm_postgresql_flexible_server" "replica" {
-  name                = "acctest-fs-replica-%d"
+  name                = "acctest-fs-replica%s-%d"
   resource_group_name = azurerm_resource_group.test.name
   location            = azurerm_resource_group.test.location
   zone                = "2"
   create_mode         = "Replica"
   source_server_id    = azurerm_postgresql_flexible_server.test.id
-  replication_role    = "None"
+  replication_role    = "%s"
 }
-`, r.basic(data), data.RandomInteger)
+`, r.basic(data), strings.ToLower(role), data.RandomInteger, role)
 }
 
 func (r PostgresqlFlexibleServerResource) upgradeVersion(data acceptance.TestData, version string) string {

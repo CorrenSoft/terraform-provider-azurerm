@@ -283,11 +283,9 @@ func resourcePostgresqlFlexibleServer() *pluginsdk.Resource {
 			},
 
 			"replication_role": {
-				Type:     pluginsdk.TypeString,
-				Optional: true,
-				ValidateFunc: validation.StringInSlice([]string{
-					string(servers.ReplicationRoleNone),
-				}, false),
+				Type:         pluginsdk.TypeString,
+				Optional:     true,
+				ValidateFunc: validation.StringInSlice(servers.PossibleValuesForReplicationRole(), false),
 			},
 
 			"identity": commonschema.UserAssignedIdentityOptional(),
@@ -456,10 +454,6 @@ func resourcePostgresqlFlexibleServerCreate(d *pluginsdk.ResourceData, meta inte
 
 	createMode := d.Get("create_mode").(string)
 
-	if _, ok := d.GetOk("replication_role"); ok {
-		return fmt.Errorf("`replication_role` cannot be set while creating")
-	}
-
 	if servers.CreateMode(createMode) == servers.CreateModePointInTimeRestore || servers.CreateMode(createMode) == servers.CreateModeGeoRestore {
 		if _, ok := d.GetOk("source_server_id"); !ok {
 			return fmt.Errorf("`source_server_id` is required when `create_mode` is  %s", createMode)
@@ -608,6 +602,11 @@ func resourcePostgresqlFlexibleServerCreate(d *pluginsdk.ResourceData, meta inte
 		updateProperties.MaintenanceWindow = expandArmServerMaintenanceWindow(v.([]interface{}))
 	}
 
+	if v, ok := d.GetOk("replication_role"); ok {
+		requireAdditionalUpdate = true
+		updateProperties.ReplicationRole = parseReplicationRole(v.(string))
+	}
+
 	if requireAdditionalUpdate {
 		update := servers.ServerForUpdate{
 			Properties: &updateProperties,
@@ -620,6 +619,22 @@ func resourcePostgresqlFlexibleServerCreate(d *pluginsdk.ResourceData, meta inte
 	d.SetId(id.ID())
 
 	return resourcePostgresqlFlexibleServerRead(d, meta)
+}
+
+func parseReplicationRole(input string) *servers.ReplicationRole {
+	vals := map[string]servers.ReplicationRole{
+		"asyncreplica":    servers.ReplicationRoleAsyncReplica,
+		"geoasyncreplica": servers.ReplicationRoleGeoAsyncReplica,
+		"none":            servers.ReplicationRoleNone,
+		"primary":         servers.ReplicationRolePrimary,
+	}
+	if v, ok := vals[strings.ToLower(input)]; ok {
+		return &v
+	}
+
+	// otherwise presume it's an undefined value and best-effort it
+	out := servers.ReplicationRole(input)
+	return &out
 }
 
 func resourcePostgresqlFlexibleServerRead(d *pluginsdk.ResourceData, meta interface{}) error {
@@ -751,6 +766,7 @@ func resourcePostgresqlFlexibleServerUpdate(d *pluginsdk.ResourceData, meta inte
 
 	createMode := d.Get("create_mode").(string)
 	if createMode == "" || servers.CreateMode(createMode) == servers.CreateModeDefault {
+
 		_, adminLoginSet := d.GetOk("administrator_login")
 		_, adminPwdSet := d.GetOk("administrator_password")
 
@@ -824,22 +840,22 @@ func resourcePostgresqlFlexibleServerUpdate(d *pluginsdk.ResourceData, meta inte
 	}
 
 	if d.HasChange("replication_role") {
-		createMode := d.Get("create_mode").(string)
-		replicationRole := d.Get("replication_role").(string)
-		if createMode == string(servers.CreateModeReplica) && replicationRole == string(servers.ReplicationRoleNone) {
-			replicationRole := servers.ReplicationRoleNone
-			parameters := servers.ServerForUpdate{
-				Properties: &servers.ServerPropertiesForUpdate{
-					ReplicationRole: &replicationRole,
-				},
-			}
-
-			if err := client.UpdateThenPoll(ctx, *id, parameters); err != nil {
-				return fmt.Errorf("updating `replication_role` for %s: %+v", *id, err)
-			}
-		} else {
-			return fmt.Errorf("`replication_role` only can be updated to `None` for replica server")
+		// createMode := d.Get("create_mode").(string)
+		replicationRole := parseReplicationRole(d.Get("replication_role").(string))
+		// if createMode == string(servers.CreateModeReplica) && replicationRole == string(servers.ReplicationRoleNone) {
+		// replicationRole := servers.ReplicationRoleNone
+		parameters := servers.ServerForUpdate{
+			Properties: &servers.ServerPropertiesForUpdate{
+				ReplicationRole: replicationRole,
+			},
 		}
+
+		if err := client.UpdateThenPoll(ctx, *id, parameters); err != nil {
+			return fmt.Errorf("updating `replication_role` for %s: %+v", *id, err)
+		}
+		// } else {
+		// 	return fmt.Errorf("`replication_role` only can be updated to `None` for replica server")
+		// }
 	}
 
 	if d.HasChange("administrator_password") {
