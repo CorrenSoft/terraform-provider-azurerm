@@ -495,7 +495,7 @@ resource "azurerm_managed_redis" "test" {
 
   tags = {
     ENV    = "Test",
-	  Method = "Update"
+    Method = "Update"
   }
 }
 `, data.RandomInteger, data.Locations.Primary, skuName)
